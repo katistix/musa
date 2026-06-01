@@ -11,8 +11,23 @@ import (
 
 func (a *App) Draw() {
 	w, h := float32(rl.GetScreenWidth()), float32(rl.GetScreenHeight())
+	if a.nowAnim > .01 {
+		a.ensureSceneTarget(int32(w), int32(h))
+		rl.BeginTextureMode(a.scene)
+		a.drawBase(w, h, true)
+		rl.EndTextureMode()
+		rl.BeginDrawing()
+		defer rl.EndDrawing()
+		a.drawBlurredScene(w, h, a.nowAnim)
+		a.drawNowPlaying(w, h)
+		return
+	}
 	rl.BeginDrawing()
 	defer rl.EndDrawing()
+	a.drawBase(w, h, false)
+}
+
+func (a *App) drawBase(w, h float32, underOverlay bool) {
 	rl.ClearBackground(rl.Black)
 	ui.Gradient(w, h)
 	baseMode := a.mode
@@ -26,11 +41,57 @@ func (a *App) Draw() {
 	case TrackMode:
 		a.drawAlbumTracks(w, h)
 	}
-	if a.nowAnim > .01 {
-		a.drawNowPlaying(w, h)
-	} else {
+	if !underOverlay {
 		a.drawPlayer(w, h)
 	}
+}
+
+func (a *App) ensureSceneTarget(w, h int32) {
+	if a.scene.ID != 0 && a.sceneW == w && a.sceneH == h {
+		return
+	}
+	if a.scene.ID != 0 {
+		rl.UnloadRenderTexture(a.scene)
+	}
+	if a.blurA.ID != 0 {
+		rl.UnloadRenderTexture(a.blurA)
+	}
+	if a.blurB.ID != 0 {
+		rl.UnloadRenderTexture(a.blurB)
+	}
+	a.scene = rl.LoadRenderTexture(w, h)
+	a.blurA = rl.LoadRenderTexture(w, h)
+	a.blurB = rl.LoadRenderTexture(w, h)
+	a.sceneW, a.sceneH = w, h
+}
+
+func (a *App) drawBlurredScene(w, h, p float32) {
+	if !ui.BlurReady {
+		rl.DrawRectangle(0, 0, int32(w), int32(h), rl.Color{R: 4, G: 6, B: 12, A: uint8(230 * p)})
+		return
+	}
+	src := rl.Rectangle{X: 0, Y: 0, Width: w, Height: -h}
+	dst := rl.Rectangle{X: 0, Y: 0, Width: w, Height: h}
+	ui.SetBlurResolution(w, h)
+
+	rl.BeginTextureMode(a.blurA)
+	rl.ClearBackground(rl.Blank)
+	rl.BeginShaderMode(ui.BlurShader)
+	ui.SetBlurDirection(6*p, 0)
+	rl.DrawTexturePro(a.scene.Texture, src, dst, rl.Vector2{}, 0, rl.White)
+	rl.EndShaderMode()
+	rl.EndTextureMode()
+
+	rl.BeginTextureMode(a.blurB)
+	rl.ClearBackground(rl.Blank)
+	rl.BeginShaderMode(ui.BlurShader)
+	ui.SetBlurDirection(0, 6*p)
+	rl.DrawTexturePro(a.blurA.Texture, src, dst, rl.Vector2{}, 0, rl.White)
+	rl.EndShaderMode()
+	rl.EndTextureMode()
+
+	rl.DrawTexturePro(a.blurB.Texture, src, dst, rl.Vector2{}, 0, rl.White)
+	rl.DrawRectangle(0, 0, int32(w), int32(h), rl.Color{R: 4, G: 6, B: 12, A: uint8(220 * p)})
 }
 
 func (a *App) drawHeader(w float32) {
@@ -122,7 +183,7 @@ func (a *App) drawNowPlaying(w, h float32) {
 	p := easeOutBack(clamp(a.nowAnim, 0, 1))
 	offset := (1 - p) * 54
 	alpha := uint8(255 * clamp(p, 0, 1))
-	rl.DrawRectangle(0, 0, int32(w), int32(h), rl.Color{R: 6, G: 8, B: 14, A: uint8(120 * p)})
+	rl.DrawRectangle(0, 0, int32(w), int32(h), rl.Color{R: 6, G: 8, B: 14, A: uint8(42 * p)})
 	i := a.playingTrack
 	if i < 0 {
 		ui.TextFit("Nothing playing", 72, h*.36+offset, w-144, 58, rl.Color{R: 255, G: 255, B: 255, A: alpha})
@@ -141,7 +202,7 @@ func (a *App) drawNowPlaying(w, h float32) {
 	ui.TextFit("NOW PLAYING", tx, y+18, w-tx-72, 20, rl.Color{R: 122, G: 220, B: 190, A: alpha})
 	ui.TextFit(t.Title, tx, y+62, w-tx-72, 54, rl.Color{R: 255, G: 255, B: 255, A: alpha})
 	ui.TextFit(ui.Meta(t.Artist, t.Album), tx+2, y+132, w-tx-74, 30, ui.Fade(rl.LightGray, .88*p))
-	ui.TextFit("Circle or Triangle to return", tx+2, y+cover-34, w-tx-74, 22, ui.Fade(rl.LightGray, .68*p))
+	ui.TextFit("Right stick scrub   D-pad left/right skip 10s   Circle/Triangle return", tx+2, y+cover-34, w-tx-74, 22, ui.Fade(rl.LightGray, .68*p))
 	a.drawNowPlayingWaveform(w, h)
 }
 

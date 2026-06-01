@@ -29,6 +29,12 @@ type App struct {
 	padCooldown  float32
 	controller   Controller
 	nowAnim      float32
+	scrubAccum   float32
+	scene        rl.RenderTexture2D
+	blurA        rl.RenderTexture2D
+	blurB        rl.RenderTexture2D
+	sceneW       int32
+	sceneH       int32
 }
 
 func Run() {
@@ -40,6 +46,8 @@ func Run() {
 	defer rl.CloseAudioDevice()
 	ui.LoadFont()
 	defer ui.UnloadFont()
+	ui.LoadShaders()
+	defer ui.UnloadShaders()
 	rl.SetTargetFPS(60)
 	a := &App{lib: music.Scan(), player: NewPlayer(), playingTrack: -1}
 	defer a.Close()
@@ -49,7 +57,19 @@ func Run() {
 	}
 }
 
-func (a *App) Close() { a.player.Close(); a.lib.Unload() }
+func (a *App) Close() {
+	a.player.Close()
+	a.lib.Unload()
+	if a.scene.ID != 0 {
+		rl.UnloadRenderTexture(a.scene)
+	}
+	if a.blurA.ID != 0 {
+		rl.UnloadRenderTexture(a.blurA)
+	}
+	if a.blurB.ID != 0 {
+		rl.UnloadRenderTexture(a.blurB)
+	}
+}
 
 func (a *App) Update() {
 	a.player.Update()
@@ -70,7 +90,7 @@ func (a *App) Update() {
 	if a.mode == NowPlayingMode {
 		target = 1
 	}
-	a.nowAnim += (target - a.nowAnim) * .18
+	a.nowAnim += (target - a.nowAnim) * .34
 	mw := rl.GetMouseWheelMove()
 	if ctrl() && mw != 0 {
 		a.player.Volume = clamp(a.player.Volume+mw*.05, 0, 1)
@@ -149,7 +169,11 @@ func (a *App) updateGamepad() {
 	if padPressed(rl.GamepadButtonMiddleRight) {
 		a.player.TogglePause()
 	} // Options
-	if a.padCooldown > 0 || a.mode == NowPlayingMode {
+	if a.mode == NowPlayingMode {
+		a.updateNowPlayingPad()
+		return
+	}
+	if a.padCooldown > 0 {
 		return
 	}
 	dx, dy, moved := padAxis(rl.GamepadAxisLeftX), padAxis(rl.GamepadAxisLeftY), false
@@ -174,6 +198,32 @@ func (a *App) updateGamepad() {
 	}
 	if moved {
 		a.padCooldown = .16
+	}
+}
+
+func (a *App) updateNowPlayingPad() {
+	if padPressed(rl.GamepadButtonLeftFaceRight) {
+		a.player.SeekSeconds(10)
+	}
+	if padPressed(rl.GamepadButtonLeftFaceLeft) {
+		a.player.SeekSeconds(-10)
+	}
+	turn := padAxis(rl.GamepadAxisRightX)
+	if turn == 0 {
+		turn = -padAxis(rl.GamepadAxisRightY)
+	}
+	if turn == 0 {
+		a.scrubAccum = 0
+		return
+	}
+	// Audible turntable-style scrub: keep the stream playing, but hop in small
+	// timed increments so you hear short snippets instead of silent teleporting.
+	a.scrubAccum += rl.GetFrameTime()
+	stepEvery := float32(.075)
+	if a.scrubAccum >= stepEvery {
+		a.scrubAccum = 0
+		step := turn * abs(turn) * 1.15
+		a.player.SeekSeconds(step)
 	}
 }
 

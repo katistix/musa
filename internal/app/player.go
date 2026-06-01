@@ -52,6 +52,12 @@ func (p *Player) Seek(ratio float32) {
 	}
 }
 
+func (p *Player) SeekSeconds(delta float32) {
+	if p.Loaded() {
+		rl.SeekMusicStream(p.music, clamp((p.Pos()+delta)/p.Len(), 0, 1)*p.Len())
+	}
+}
+
 func (p *Player) TogglePause() {
 	if !p.Loaded() {
 		return
