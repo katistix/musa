@@ -4,13 +4,7 @@
   <img src="assets/icon.png" alt="Musa icon" width="160" height="160">
 </p>
 
-<p align="center">
-  <a href="./musa%20presentation.mp4">
-    <img src="assets/icon.png" alt="Watch Musa presentation" width="160" height="160">
-  </a>
-</p>
-
-<p align="center"><a href="./musa%20presentation.mp4">Watch the Musa presentation video</a></p>
+![Musa presentation](assets/musa-presentation.gif)
 
 A controller-friendly music player for your own library.
 
