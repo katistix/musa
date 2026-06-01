@@ -29,6 +29,10 @@ type App struct {
 	padCooldown  float32
 	controller   Controller
 	nowAnim      float32
+	trackAnim    float32
+	trackDir     float32
+	pendingDir   float32
+	lastTrack    int
 	scrubAccum   float32
 	scene        rl.RenderTexture2D
 	blurA        rl.RenderTexture2D
@@ -49,6 +53,7 @@ func Run() {
 	ui.LoadShaders()
 	defer ui.UnloadShaders()
 	rl.SetTargetFPS(60)
+
 	a := &App{lib: music.Scan(), player: NewPlayer(), playingTrack: -1}
 	defer a.Close()
 	for !rl.WindowShouldClose() {
@@ -73,10 +78,12 @@ func (a *App) Close() {
 
 func (a *App) Update() {
 	a.player.Update()
+	a.updatePlayback()
 	a.controller = DetectController()
 	if a.padCooldown > 0 {
 		a.padCooldown -= rl.GetFrameTime()
 	}
+
 	if rl.IsKeyPressed(rl.KeyN) {
 		a.toggleNowPlaying()
 	}
@@ -86,22 +93,31 @@ func (a *App) Update() {
 	if rl.IsKeyPressed(rl.KeySpace) {
 		a.player.TogglePause()
 	}
+
 	target := float32(0)
 	if a.mode == NowPlayingMode {
 		target = 1
 	}
 	a.nowAnim += (target - a.nowAnim) * .34
+	a.trackAnim *= .80
+	if a.trackAnim < .01 {
+		a.trackAnim = 0
+		a.lastTrack = -1
+	}
+
 	mw := rl.GetMouseWheelMove()
 	if ctrl() && mw != 0 {
 		a.player.Volume = clamp(a.player.Volume+mw*.05, 0, 1)
 		return
 	}
+
 	switch a.mode {
 	case AlbumMode:
 		a.updateAlbums(mw)
 	case TrackMode:
 		a.updateTracks(mw)
 	}
+
 	a.updateGamepad()
 	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 		a.handleClick()
@@ -143,13 +159,78 @@ func (a *App) updateTracks(wheel float32) {
 	}
 }
 
+func (a *App) updatePlayback() {
+	if a.player.Finished() {
+		a.Next()
+	}
+}
+
+func (a *App) PlayNow(ti int) {
+	if ti < 0 || ti >= len(a.lib.Tracks) {
+		return
+	}
+	if a.playingTrack != -1 && a.playingTrack != ti {
+		a.lastTrack = a.playingTrack
+		a.trackAnim = 1
+		if a.pendingDir != 0 {
+			a.trackDir = a.pendingDir
+			a.pendingDir = 0
+		} else if nextDir(a, ti) >= 0 {
+			a.trackDir = 1
+		} else {
+			a.trackDir = -1
+		}
+	}
+	if a.player.Play(a.lib.Tracks[ti].Path) {
+		a.playingTrack = ti
+	}
+}
+
+func (a *App) Next() {
+	if a.playingTrack < 0 {
+		return
+	}
+	alIdx := a.albumForTrack(a.playingTrack)
+	al := a.lib.Albums[alIdx]
+	curr := 0
+	for i, ti := range al.Tracks {
+		if ti == a.playingTrack {
+			curr = i
+			break
+		}
+	}
+	a.pendingDir = -1
+	a.PlayNow(al.Tracks[(curr+1)%len(al.Tracks)])
+}
+
+func (a *App) Prev() {
+	if a.playingTrack < 0 {
+		return
+	}
+	if a.player.Pos() > 3 {
+		a.player.Seek(0)
+		return
+	}
+	alIdx := a.albumForTrack(a.playingTrack)
+	al := a.lib.Albums[alIdx]
+	curr := 0
+	for i, ti := range al.Tracks {
+		if ti == a.playingTrack {
+			curr = i
+			break
+		}
+	}
+	a.pendingDir = 1
+	a.PlayNow(al.Tracks[(curr-1+len(al.Tracks))%len(al.Tracks)])
+}
+
 func (a *App) updateGamepad() {
 	if !a.controller.Connected {
 		return
 	}
 	if padPressed(rl.GamepadButtonRightFaceUp) {
 		a.toggleNowPlaying()
-	} // Triangle
+	}
 	if padPressed(rl.GamepadButtonRightFaceDown) {
 		if a.mode == AlbumMode {
 			a.openAlbum()
@@ -165,10 +246,17 @@ func (a *App) updateGamepad() {
 		} else {
 			a.back()
 		}
-	} // Circle / Share
+	}
 	if padPressed(rl.GamepadButtonMiddleRight) {
 		a.player.TogglePause()
-	} // Options
+	}
+	if padPressed(rl.GamepadButtonLeftTrigger1) || padPressed(rl.GamepadButtonLeftTrigger2) {
+		a.Prev()
+	}
+	if padPressed(rl.GamepadButtonRightTrigger1) || padPressed(rl.GamepadButtonRightTrigger2) {
+		a.Next()
+	}
+
 	if a.mode == NowPlayingMode {
 		a.updateNowPlayingPad()
 		return
@@ -216,21 +304,17 @@ func (a *App) updateNowPlayingPad() {
 		a.scrubAccum = 0
 		return
 	}
-	// Audible turntable-style scrub: keep the stream playing, but hop in small
-	// timed increments so you hear short snippets instead of silent teleporting.
 	a.scrubAccum += rl.GetFrameTime()
-	stepEvery := float32(.075)
-	if a.scrubAccum >= stepEvery {
+	if a.scrubAccum >= .075 {
 		a.scrubAccum = 0
-		step := turn * abs(turn) * 1.15
-		a.player.SeekSeconds(step)
+		a.player.SeekSeconds(turn * abs(turn) * 1.15)
 	}
 }
 
 func (a *App) handleClick() {
 	m := rl.GetMousePosition()
 	w, h := float32(rl.GetScreenWidth()), float32(rl.GetScreenHeight())
-	bar := rl.Rectangle{X: 46, Y: h - 70, Width: w - 92, Height: 12}
+	bar := rl.Rectangle{X: 64, Y: h - 118, Width: w - 128, Height: 10}
 	if rl.CheckCollisionPointRec(m, bar) {
 		a.player.Seek((m.X - bar.X) / bar.Width)
 		return
@@ -238,12 +322,20 @@ func (a *App) handleClick() {
 	if a.mode != AlbumMode || len(a.lib.Albums) == 0 {
 		return
 	}
-	center, spacing := w/2, float32(235)
+	center := w / 2
+	spacing := min(h*.33, w*.22) * 1.55
+	focusSize := min(h*.33, w*.22)
+	baseY := h * .23
 	for i := range a.lib.Albums {
 		d := float32(i) - a.carouselX
-		s := float32(210) * (1 - min(abs(d)*.12, .42))
+		if abs(d) > 2.0 {
+			continue
+		}
+		scale := 1 - min(abs(d)*.35, .52)
+		s := focusSize * scale
 		x := center + d*spacing - s/2
-		if m.X >= x && m.X <= x+s && m.Y >= 175 && m.Y <= 175+s {
+		y := baseY + (focusSize-s)/2
+		if m.X >= x && m.X <= x+s && m.Y >= y && m.Y <= y+s {
 			a.album = i
 			if abs(d) < .15 {
 				a.openAlbum()
@@ -259,7 +351,6 @@ func (a *App) back() {
 		a.mode = AlbumMode
 	}
 }
-
 func (a *App) toggleNowPlaying() {
 	if a.mode == NowPlayingMode {
 		a.mode = a.prevMode
@@ -273,10 +364,7 @@ func (a *App) playSelected() {
 	if a.track < 0 || a.track >= len(tracks) {
 		return
 	}
-	ti := tracks[a.track]
-	if a.player.Play(a.lib.Tracks[ti].Path) {
-		a.playingTrack = ti
-	}
+	a.PlayNow(tracks[a.track])
 }
 func (a *App) albumTracks() []int {
 	if a.album < 0 || a.album >= len(a.lib.Albums) {
@@ -312,6 +400,25 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+func nextDir(a *App, ti int) int {
+	if a.playingTrack < 0 {
+		return 1
+	}
+	al := a.lib.Albums[a.albumForTrack(ti)]
+	currIdx, nextIdx := 0, 0
+	for i, t := range al.Tracks {
+		if t == a.playingTrack {
+			currIdx = i
+		}
+		if t == ti {
+			nextIdx = i
+		}
+	}
+	if nextIdx >= currIdx {
+		return 1
+	}
+	return -1
 }
 
 func easeOutBack(x float32) float32 {

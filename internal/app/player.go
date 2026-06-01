@@ -107,6 +107,14 @@ func (p *Player) Close() {
 	}
 }
 
+func (p *Player) Finished() bool {
+	if !p.Loaded() || p.Paused {
+		return false
+	}
+	// Small threshold to detect end of stream reliably
+	return p.Pos() >= p.Len()-0.15
+}
+
 func playablePath(path string) (string, string, error) {
 	if strings.ToLower(filepath.Ext(path)) != ".flac" {
 		return path, "", nil
