@@ -8,6 +8,7 @@ import (
 
 type Controller struct {
 	Connected bool
+	Index     int32
 	Name      string
 	DualShock bool
 }
@@ -17,7 +18,7 @@ func DetectController() Controller {
 		if rl.IsGamepadAvailable(i) {
 			name := rl.GetGamepadName(i)
 			low := strings.ToLower(name)
-			return Controller{Connected: true, Name: name, DualShock: strings.Contains(low, "dualshock") || strings.Contains(low, "wireless controller") || strings.Contains(low, "playstation") || strings.Contains(low, "ps4")}
+			return Controller{Connected: true, Index: i, Name: name, DualShock: strings.Contains(low, "dualshock") || strings.Contains(low, "wireless controller") || strings.Contains(low, "playstation") || strings.Contains(low, "ps4")}
 		}
 	}
 	return Controller{}

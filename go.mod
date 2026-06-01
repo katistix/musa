@@ -5,6 +5,7 @@ go 1.23
 require (
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/gen2brain/raylib-go/raylib v0.60.0
+	github.com/veandco/go-sdl2 v0.4.40
 )
 
 require (

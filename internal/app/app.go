@@ -15,6 +15,7 @@ const (
 	AlbumMode Mode = iota
 	TrackMode
 	NowPlayingMode
+	MenuMode
 )
 
 type App struct {
@@ -25,6 +26,8 @@ type App struct {
 	album        int
 	track        int
 	playingTrack int
+	menuSel      int
+	state        AppState
 	carouselX    float32
 	padCooldown  float32
 	controller   Controller
@@ -44,6 +47,11 @@ type App struct {
 func Run() {
 	rl.SetConfigFlags(rl.FlagWindowResizable | rl.FlagMsaa4xHint)
 	rl.InitWindow(1280, 720, "Musa - your music shelf")
+	setDockIcon("assets/icon.png")
+	if icon := rl.LoadImage("assets/icon.png"); icon.Data != nil {
+		rl.SetWindowIcon(*icon)
+		rl.UnloadImage(icon)
+	}
 	rl.SetExitKey(0)
 	defer rl.CloseWindow()
 	rl.InitAudioDevice()
@@ -54,7 +62,8 @@ func Run() {
 	defer ui.UnloadShaders()
 	rl.SetTargetFPS(60)
 
-	a := &App{lib: music.Scan(), player: NewPlayer(), playingTrack: -1}
+	a := &App{lib: music.Scan(), player: NewPlayer(), playingTrack: -1, state: loadState(), lastTrack: -1}
+	a.restoreState()
 	defer a.Close()
 	for !rl.WindowShouldClose() {
 		a.Update()
@@ -63,6 +72,7 @@ func Run() {
 }
 
 func (a *App) Close() {
+	a.persistState()
 	a.player.Close()
 	a.lib.Unload()
 	if a.scene.ID != 0 {
@@ -90,6 +100,9 @@ func (a *App) Update() {
 	if rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyEscape) {
 		a.back()
 	}
+	if rl.IsKeyPressed(rl.KeyR) && ctrl() {
+		a.rescanLibrary()
+	}
 	if rl.IsKeyPressed(rl.KeySpace) {
 		a.player.TogglePause()
 	}
@@ -116,6 +129,8 @@ func (a *App) Update() {
 		a.updateAlbums(mw)
 	case TrackMode:
 		a.updateTracks(mw)
+	case MenuMode:
+		a.updateMenu(mw)
 	}
 
 	a.updateGamepad()
@@ -159,10 +174,74 @@ func (a *App) updateTracks(wheel float32) {
 	}
 }
 
+func (a *App) updateMenu(wheel float32) {
+	if rl.IsKeyPressed(rl.KeyDown) || wheel < 0 {
+		a.menuSel = minInt(a.menuSel+1, 0)
+	}
+	if rl.IsKeyPressed(rl.KeyUp) || wheel > 0 {
+		a.menuSel = maxInt(a.menuSel-1, 0)
+	}
+	if rl.IsKeyPressed(rl.KeyEnter) {
+		a.activateMenu()
+	}
+}
+
+func (a *App) activateMenu() {
+	switch a.menuSel {
+	case 0:
+		a.rescanLibrary()
+		a.mode = a.prevMode
+	}
+}
+
+func (a *App) rescanLibrary() {
+	currentPath := ""
+	if a.playingTrack >= 0 && a.playingTrack < len(a.lib.Tracks) {
+		currentPath = a.lib.Tracks[a.playingTrack].Path
+	}
+	a.lib.Unload()
+	a.lib = music.Scan()
+	if a.album >= len(a.lib.Albums) {
+		a.album = maxInt(len(a.lib.Albums)-1, 0)
+	}
+	if currentPath != "" {
+		for i, t := range a.lib.Tracks {
+			if t.Path == currentPath {
+				a.playingTrack = i
+				break
+			}
+		}
+	}
+}
+
 func (a *App) updatePlayback() {
 	if a.player.Finished() {
 		a.Next()
 	}
+}
+
+func (a *App) restoreState() {
+	if a.state.Album >= 0 && a.state.Album < len(a.lib.Albums) {
+		a.album = a.state.Album
+	}
+	if a.state.Track >= 0 && a.state.Track < len(a.lib.Tracks) {
+		a.playingTrack = a.state.Track
+		_ = a.player.Play(a.lib.Tracks[a.state.Track].Path)
+		a.player.TogglePause()
+		if a.state.Position > 0 {
+			a.player.Seek(a.state.Position / a.player.Len())
+		}
+	}
+}
+
+func (a *App) persistState() {
+	a.state.Album = a.album
+	a.state.Track = a.playingTrack
+	a.state.Position = 0
+	if a.player.Loaded() {
+		a.state.Position = a.player.Pos()
+	}
+	saveState(a.state)
 }
 
 func (a *App) PlayNow(ti int) {
@@ -225,7 +304,7 @@ func (a *App) Prev() {
 }
 
 func (a *App) updateGamepad() {
-	if !a.controller.Connected {
+	if !rl.IsWindowFocused() || !a.controller.Connected {
 		return
 	}
 	if padPressed(rl.GamepadButtonRightFaceUp) {
@@ -236,6 +315,8 @@ func (a *App) updateGamepad() {
 			a.openAlbum()
 		} else if a.mode == TrackMode {
 			a.playSelected()
+		} else if a.mode == MenuMode {
+			a.activateMenu()
 		} else {
 			a.player.TogglePause()
 		}
@@ -248,7 +329,7 @@ func (a *App) updateGamepad() {
 		}
 	}
 	if padPressed(rl.GamepadButtonMiddleRight) {
-		a.player.TogglePause()
+		a.toggleMenu()
 	}
 	if padPressed(rl.GamepadButtonLeftTrigger1) || padPressed(rl.GamepadButtonLeftTrigger2) {
 		a.Prev()
@@ -349,7 +430,20 @@ func (a *App) openAlbum() { a.mode = TrackMode; a.track = 0 }
 func (a *App) back() {
 	if a.mode == TrackMode {
 		a.mode = AlbumMode
+		return
 	}
+	if a.mode == MenuMode {
+		a.mode = a.prevMode
+	}
+}
+func (a *App) toggleMenu() {
+	if a.mode == MenuMode {
+		a.mode = a.prevMode
+		return
+	}
+	a.prevMode = a.mode
+	a.menuSel = 0
+	a.mode = MenuMode
 }
 func (a *App) toggleNowPlaying() {
 	if a.mode == NowPlayingMode {
@@ -420,7 +514,6 @@ func nextDir(a *App, ti int) int {
 	}
 	return -1
 }
-
 func easeOutBack(x float32) float32 {
 	c1 := float32(1.70158)
 	c3 := c1 + 1

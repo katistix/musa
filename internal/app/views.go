@@ -25,13 +25,16 @@ func (a *App) Draw() {
 	rl.BeginDrawing()
 	defer rl.EndDrawing()
 	a.drawBase(w, h, false)
+	if a.mode == MenuMode {
+		a.drawMenu(w, h)
+	}
 }
 
 func (a *App) drawBase(w, h float32, underOverlay bool) {
 	rl.ClearBackground(rl.Black)
 	ui.Gradient(w, h)
 	baseMode := a.mode
-	if a.mode == NowPlayingMode {
+	if a.mode == NowPlayingMode || a.mode == MenuMode {
 		baseMode = a.prevMode
 	}
 	a.drawHeader(w)
@@ -106,14 +109,27 @@ func (a *App) drawHeader(w float32) {
 
 func (a *App) drawHints(w, h float32, mode Mode) {
 	if a.controller.Connected {
-		hints := []ui.Hint{{Button: "Dpad", Label: "Browse"}, {Button: "Cross", Label: "Open"}, {Button: "Triangle", Label: "Now Playing"}, {Button: "Options", Label: "Pause"}}
+		hints := []ui.Hint{{Button: "Dpad", Label: "Browse"}, {Button: "Cross", Label: "Open"}, {Button: "Triangle", Label: "Now Playing"}, {Button: "Options", Label: "Menu"}}
 		if mode == TrackMode {
-			hints = []ui.Hint{{Button: "Dpad", Label: "Select"}, {Button: "Cross", Label: "Play Album"}, {Button: "Circle", Label: "Back"}, {Button: "Triangle", Label: "Now Playing"}}
+			hints = []ui.Hint{{Button: "Dpad", Label: "Select"}, {Button: "Cross", Label: "Play Album"}, {Button: "Circle", Label: "Back"}, {Button: "Triangle", Label: "Now Playing"}, {Button: "Options", Label: "Menu"}}
 		}
 		ui.DrawHints(hints, w, h)
 		return
 	}
-	ui.DrawHints([]ui.Hint{{Button: "Arrows", Label: "Browse"}, {Button: "Enter", Label: "Play Album"}, {Button: "N", Label: "Now Playing"}, {Button: "Space", Label: "Pause"}}, w, h)
+	ui.DrawHints([]ui.Hint{{Button: "Arrows", Label: "Browse"}, {Button: "Enter", Label: "Play Album"}, {Button: "N", Label: "Now Playing"}, {Button: "Ctrl+R", Label: "Rescan"}}, w, h)
+}
+
+func (a *App) drawMenu(w, h float32) {
+	rl.DrawRectangle(0, 0, int32(w), int32(h), rl.Color{R: 6, G: 8, B: 14, A: 120})
+	ui.Text("Menu", w*.5-48, h*.5-78, 32, rl.RayWhite)
+	row := rl.Rectangle{X: w*.5 - 170, Y: h*.5 - 8, Width: 340, Height: 54}
+	rl.DrawRectangleRoundedLines(row, .18, 12, rl.Color{R: 122, G: 220, B: 190, A: 255})
+	ui.Text("Rescan library", row.X+22, row.Y+15, 24, rl.RayWhite)
+	if a.controller.Connected {
+		ui.DrawHints([]ui.Hint{{Button: "Cross", Label: "Select"}, {Button: "Circle", Label: "Back"}}, w, h)
+	} else {
+		ui.DrawHints([]ui.Hint{{Button: "Enter", Label: "Select"}, {Button: "Esc", Label: "Back"}}, w, h)
+	}
 }
 
 func (a *App) drawShelf(w, h float32) {
@@ -237,7 +253,6 @@ func (a *App) drawNowPlayingTransition(w, y, cover float32, alpha uint8, current
 
 func (a *App) drawNowPlayingContent(x, y, cover float32, alpha uint8, track int, intensity float32) {
 	albumIdx := a.albumForTrack(track)
-	rl.DrawRectangleRounded(rl.Rectangle{X: x + 18, Y: y + 22, Width: cover, Height: cover}, .08, 12, rl.Color{R: 0, G: 0, B: 0, A: uint8(95 * intensity)})
 	ui.CoverOrDisc(a.lib.Cover(albumIdx), x, y, cover, rl.Color{R: 255, G: 255, B: 255, A: alpha})
 	t := a.lib.Tracks[track]
 	tx := x + cover + 58

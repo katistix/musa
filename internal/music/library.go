@@ -69,7 +69,7 @@ func (l *Library) buildAlbums() {
 	byKey := map[string]int{}
 	for i, t := range l.Tracks {
 		album, artist := safe(t.Album, filepath.Base(filepath.Dir(t.Path))), safe(t.Artist, "Unknown Artist")
-		key := strings.ToLower(artist + "\x00" + album)
+		key := strings.ToLower(album)
 		ai, ok := byKey[key]
 		if !ok {
 			ai = len(l.Albums)
