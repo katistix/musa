@@ -5,8 +5,12 @@
 </p>
 
 <p align="center">
-  <video src="./musa%20presentation.mp4" controls width="900"></video>
+  <a href="./musa%20presentation.mp4">
+    <img src="assets/icon.png" alt="Watch Musa presentation" width="160" height="160">
+  </a>
 </p>
+
+<p align="center"><a href="./musa%20presentation.mp4">Watch the Musa presentation video</a></p>
 
 A controller-friendly music player for your own library.
 
