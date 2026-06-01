@@ -12,10 +12,10 @@ Musa is built with Go + Raylib and is designed around browsing albums, enjoying 
 
 ### macOS
 
-From anywhere:
+Clone and install:
 
 ```bash
-go install github.com/katistix/musa/cmd/musa-install@latest && $(go env GOPATH)/bin/musa-install
+git clone https://github.com/katistix/musa.git && cd musa && go install ./cmd/musa-install && $(go env GOPATH)/bin/musa-install
 ```
 
 This creates a standalone app bundle at:
