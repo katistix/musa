@@ -13,13 +13,13 @@ func TextFit(s string, x, y, maxW float32, size int32, c rl.Color) {
 		return
 	}
 	r := []rune(s)
-	for len(r) > 1 && rl.MeasureText(string(r), size) > int32(maxW) {
+	for len(r) > 1 && Measure(string(r), size) > int32(maxW) {
 		r = r[:len(r)-1]
 	}
 	if len(r) < len([]rune(s)) && len(r) > 1 {
 		r[len(r)-1] = '…'
 	}
-	rl.DrawText(string(r), int32(x), int32(y), size, c)
+	Text(string(r), x, y, size, c)
 }
 
 func CoverOrDisc(tex *rl.Texture2D, x, y, s float32, tint rl.Color) {

@@ -1,9 +1,7 @@
 package app
 
 import (
-	"fmt"
 	"math"
-	"strings"
 
 	"musa/internal/music"
 	"musa/internal/ui"
@@ -16,28 +14,32 @@ type Mode int
 const (
 	AlbumMode Mode = iota
 	TrackMode
+	NowPlayingMode
 )
 
 type App struct {
 	lib          music.Library
 	player       *Player
 	mode         Mode
+	prevMode     Mode
 	album        int
 	track        int
 	playingTrack int
 	carouselX    float32
-	query        string
 	padCooldown  float32
 	controller   Controller
+	nowAnim      float32
 }
 
 func Run() {
 	rl.SetConfigFlags(rl.FlagWindowResizable | rl.FlagMsaa4xHint)
-	rl.InitWindow(1220, 760, "Musa - your music shelf")
+	rl.InitWindow(1280, 720, "Musa - your music shelf")
 	rl.SetExitKey(0)
 	defer rl.CloseWindow()
 	rl.InitAudioDevice()
 	defer rl.CloseAudioDevice()
+	ui.LoadFont()
+	defer ui.UnloadFont()
 	rl.SetTargetFPS(60)
 	a := &App{lib: music.Scan(), player: NewPlayer(), playingTrack: -1}
 	defer a.Close()
@@ -55,24 +57,29 @@ func (a *App) Update() {
 	if a.padCooldown > 0 {
 		a.padCooldown -= rl.GetFrameTime()
 	}
-	if rl.IsKeyPressed(rl.KeyTab) {
-		if a.mode == AlbumMode {
-			a.mode = TrackMode
-		} else {
-			a.mode = AlbumMode
-		}
+	if rl.IsKeyPressed(rl.KeyN) {
+		a.toggleNowPlaying()
+	}
+	if rl.IsKeyPressed(rl.KeyTab) || rl.IsKeyPressed(rl.KeyEscape) {
+		a.back()
 	}
 	if rl.IsKeyPressed(rl.KeySpace) {
 		a.player.TogglePause()
 	}
+	target := float32(0)
+	if a.mode == NowPlayingMode {
+		target = 1
+	}
+	a.nowAnim += (target - a.nowAnim) * .18
 	mw := rl.GetMouseWheelMove()
 	if ctrl() && mw != 0 {
 		a.player.Volume = clamp(a.player.Volume+mw*.05, 0, 1)
 		return
 	}
-	if a.mode == AlbumMode {
+	switch a.mode {
+	case AlbumMode:
 		a.updateAlbums(mw)
-	} else {
+	case TrackMode:
 		a.updateTracks(mw)
 	}
 	a.updateGamepad()
@@ -92,8 +99,7 @@ func (a *App) updateAlbums(wheel float32) {
 		a.album = maxInt(a.album-1, 0)
 	}
 	if rl.IsKeyPressed(rl.KeyEnter) {
-		a.mode = TrackMode
-		a.track = 0
+		a.openAlbum()
 	}
 	a.carouselX += (float32(a.album) - a.carouselX) * .16
 }
@@ -121,30 +127,32 @@ func (a *App) updateGamepad() {
 	if !a.controller.Connected {
 		return
 	}
-	if padPressed(rl.GamepadButtonRightFaceDown) { // DualShock: Cross
+	if padPressed(rl.GamepadButtonRightFaceUp) {
+		a.toggleNowPlaying()
+	} // Triangle
+	if padPressed(rl.GamepadButtonRightFaceDown) {
 		if a.mode == AlbumMode {
-			a.mode = TrackMode
-			a.track = 0
-		} else {
+			a.openAlbum()
+		} else if a.mode == TrackMode {
 			a.playSelected()
+		} else {
+			a.player.TogglePause()
 		}
 	}
-	if padPressed(rl.GamepadButtonRightFaceRight) {
-		a.mode = AlbumMode
-	} // Circle
+	if padPressed(rl.GamepadButtonRightFaceRight) || padPressed(rl.GamepadButtonMiddleLeft) {
+		if a.mode == NowPlayingMode {
+			a.toggleNowPlaying()
+		} else {
+			a.back()
+		}
+	} // Circle / Share
 	if padPressed(rl.GamepadButtonMiddleRight) {
 		a.player.TogglePause()
 	} // Options
-	if padPressed(rl.GamepadButtonMiddleLeft) {
-		a.mode = AlbumMode
-	} // Share
-
-	if a.padCooldown > 0 {
+	if a.padCooldown > 0 || a.mode == NowPlayingMode {
 		return
 	}
-	dx := padAxis(rl.GamepadAxisLeftX)
-	dy := padAxis(rl.GamepadAxisLeftY)
-	moved := false
+	dx, dy, moved := padAxis(rl.GamepadAxisLeftX), padAxis(rl.GamepadAxisLeftY), false
 	if a.mode == AlbumMode && len(a.lib.Albums) > 0 {
 		if padPressed(rl.GamepadButtonLeftFaceRight) || dx > 0 {
 			a.album = minInt(a.album+1, len(a.lib.Albums)-1)
@@ -154,17 +162,14 @@ func (a *App) updateGamepad() {
 			a.album = maxInt(a.album-1, 0)
 			moved = true
 		}
-	} else {
-		tracks := a.albumTracks()
-		if len(tracks) > 0 {
-			if padPressed(rl.GamepadButtonLeftFaceDown) || dy > 0 {
-				a.track = minInt(a.track+1, len(tracks)-1)
-				moved = true
-			}
-			if padPressed(rl.GamepadButtonLeftFaceUp) || dy < 0 {
-				a.track = maxInt(a.track-1, 0)
-				moved = true
-			}
+	} else if tracks := a.albumTracks(); len(tracks) > 0 {
+		if padPressed(rl.GamepadButtonLeftFaceDown) || dy > 0 {
+			a.track = minInt(a.track+1, len(tracks)-1)
+			moved = true
+		}
+		if padPressed(rl.GamepadButtonLeftFaceUp) || dy < 0 {
+			a.track = maxInt(a.track-1, 0)
+			moved = true
 		}
 	}
 	if moved {
@@ -175,28 +180,44 @@ func (a *App) updateGamepad() {
 func (a *App) handleClick() {
 	m := rl.GetMousePosition()
 	w, h := float32(rl.GetScreenWidth()), float32(rl.GetScreenHeight())
-	bar := rl.Rectangle{X: 28, Y: h - 58, Width: w - 56, Height: 9}
+	bar := rl.Rectangle{X: 46, Y: h - 70, Width: w - 92, Height: 12}
 	if rl.CheckCollisionPointRec(m, bar) {
 		a.player.Seek((m.X - bar.X) / bar.Width)
 		return
 	}
-	if a.mode == AlbumMode && len(a.lib.Albums) > 0 {
-		center := w / 2
-		spacing := float32(210)
-		for i := range a.lib.Albums {
-			x := center + (float32(i)-a.carouselX)*spacing
-			s := float32(172) * (1 - min(abs(float32(i)-a.carouselX)*.12, .42))
-			if m.X >= x-s/2 && m.X <= x+s/2 && m.Y >= 185 && m.Y <= 185+s {
-				a.album = i
-				if abs(float32(i)-a.carouselX) < .15 {
-					a.mode = TrackMode
-				}
-				return
+	if a.mode != AlbumMode || len(a.lib.Albums) == 0 {
+		return
+	}
+	center, spacing := w/2, float32(235)
+	for i := range a.lib.Albums {
+		d := float32(i) - a.carouselX
+		s := float32(210) * (1 - min(abs(d)*.12, .42))
+		x := center + d*spacing - s/2
+		if m.X >= x && m.X <= x+s && m.Y >= 175 && m.Y <= 175+s {
+			a.album = i
+			if abs(d) < .15 {
+				a.openAlbum()
 			}
+			return
 		}
 	}
 }
 
+func (a *App) openAlbum() { a.mode = TrackMode; a.track = 0 }
+func (a *App) back() {
+	if a.mode == TrackMode {
+		a.mode = AlbumMode
+	}
+}
+
+func (a *App) toggleNowPlaying() {
+	if a.mode == NowPlayingMode {
+		a.mode = a.prevMode
+		return
+	}
+	a.prevMode = a.mode
+	a.mode = NowPlayingMode
+}
 func (a *App) playSelected() {
 	tracks := a.albumTracks()
 	if a.track < 0 || a.track >= len(tracks) {
@@ -207,112 +228,11 @@ func (a *App) playSelected() {
 		a.playingTrack = ti
 	}
 }
-
 func (a *App) albumTracks() []int {
 	if a.album < 0 || a.album >= len(a.lib.Albums) {
 		return nil
 	}
 	return a.lib.Albums[a.album].Tracks
-}
-
-func (a *App) Draw() {
-	w, h := float32(rl.GetScreenWidth()), float32(rl.GetScreenHeight())
-	rl.BeginDrawing()
-	defer rl.EndDrawing()
-	rl.ClearBackground(rl.Black)
-	ui.Gradient(w, h)
-	rl.DrawText("Musa", 28, 22, 34, rl.RayWhite)
-	hint := "Keyboard: arrows browse, Enter open/play, Tab back, Space pause"
-	if a.controller.Connected {
-		kind := "Controller"
-		if a.controller.DualShock {
-			kind = "DualShock"
-		}
-		hint = fmt.Sprintf("%s: D-pad/left stick browse, Cross open/play, Circle back, Options pause", kind)
-	}
-	rl.DrawText(hint, 126, 36, 15, ui.Fade(rl.LightGray, .78))
-	if a.mode == AlbumMode {
-		a.drawShelf(w, h)
-	} else {
-		a.drawAlbumTracks(w, h)
-	}
-	a.drawPlayer(w, h)
-}
-
-func (a *App) drawShelf(w, h float32) {
-	if len(a.lib.Albums) == 0 {
-		rl.DrawText("No music found in ~/Music", 40, 120, 24, rl.RayWhite)
-		return
-	}
-	center := w / 2
-	spacing := float32(210)
-	baseY := float32(185)
-	for i := range a.lib.Albums {
-		d := float32(i) - a.carouselX
-		if abs(d) > 3.5 {
-			continue
-		}
-		scale := 1 - min(abs(d)*.12, .42)
-		s := 190 * scale
-		x := center + d*spacing - s/2
-		y := baseY + abs(d)*24
-		alpha := uint8(255 * scale)
-		tint := rl.Color{R: 255, G: 255, B: 255, A: alpha}
-		rl.DrawRectangleRounded(rl.Rectangle{X: x + 10, Y: y + 14, Width: s, Height: s}, .06, 8, rl.Color{R: 0, G: 0, B: 0, A: uint8(80 * scale)})
-		ui.CoverOrDisc(a.lib.Cover(i), x, y, s, tint)
-		if i == a.album {
-			rl.DrawRectangleRoundedLines(rl.Rectangle{X: x - 6, Y: y - 6, Width: s + 12, Height: s + 12}, .06, 8, rl.Color{R: 122, G: 220, B: 190, A: 255})
-		}
-	}
-	a.drawAlbumInfo(w, 430)
-}
-
-func (a *App) drawAlbumInfo(w, y float32) {
-	al := a.lib.Albums[a.album]
-	ui.TextFit(al.Title, 80, y, w-160, 32, rl.RayWhite)
-	ui.TextFit(fmt.Sprintf("%s · %d tracks", al.Artist, len(al.Tracks)), 82, y+42, w-164, 18, ui.Fade(rl.LightGray, .78))
-}
-
-func (a *App) drawAlbumTracks(w, h float32) {
-	if len(a.lib.Albums) == 0 {
-		return
-	}
-	al := a.lib.Albums[a.album]
-	ui.CoverOrDisc(a.lib.Cover(a.album), 34, 92, 210, rl.White)
-	ui.TextFit(al.Title, 270, 96, w-310, 30, rl.RayWhite)
-	ui.TextFit(al.Artist, 272, 134, w-312, 18, ui.Fade(rl.LightGray, .78))
-	x, y, row := float32(270), float32(184), float32(38)
-	for i, ti := range al.Tracks {
-		if y+float32(i)*row > h-90 {
-			break
-		}
-		t := a.lib.Tracks[ti]
-		yy := y + float32(i)*row
-		if i == a.track {
-			rl.DrawRectangleRounded(rl.Rectangle{X: x - 12, Y: yy - 6, Width: w - x - 38, Height: 32}, .25, 8, rl.Color{R: 60, G: 72, B: 105, A: 210})
-		}
-		col := rl.RayWhite
-		if ti == a.playingTrack {
-			col = rl.Color{R: 122, G: 220, B: 190, A: 255}
-		}
-		ui.TextFit(fmt.Sprintf("%02d  %s", i+1, t.Title), x, yy, w-x-54, 17, col)
-	}
-}
-
-func (a *App) drawPlayer(w, h float32) {
-	bar := rl.Rectangle{X: 28, Y: h - 58, Width: w - 56, Height: 9}
-	r := clamp(a.player.Pos()/a.player.Len(), 0, 1)
-	rl.DrawRectangleRounded(bar, .5, 8, rl.Color{R: 45, G: 49, B: 67, A: 255})
-	rl.DrawRectangleRounded(rl.Rectangle{X: bar.X, Y: bar.Y, Width: bar.Width * r, Height: bar.Height}, .5, 8, rl.Color{R: 122, G: 220, B: 190, A: 255})
-	line := fmt.Sprintf("%s / %s", ui.Dur(a.player.Pos()), ui.Dur(a.player.Len()))
-	if a.playingTrack >= 0 {
-		t := a.lib.Tracks[a.playingTrack]
-		line += "  ·  " + strings.TrimSpace(t.Artist+" — "+t.Title)
-	}
-	if a.player.Status != "" {
-		line = a.player.Status
-	}
-	ui.TextFit(line, 28, h-36, w-56, 15, ui.Fade(rl.RayWhite, .82))
 }
 
 func ctrl() bool { return rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl) }
@@ -342,4 +262,10 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func easeOutBack(x float32) float32 {
+	c1 := float32(1.70158)
+	c3 := c1 + 1
+	return 1 + c3*float32(math.Pow(float64(x-1), 3)) + c1*float32(math.Pow(float64(x-1), 2))
 }

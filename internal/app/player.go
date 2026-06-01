@@ -1,7 +1,9 @@
 package app
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +18,7 @@ type Player struct {
 	Paused    bool
 	Volume    float32
 	Status    string
+	Waveform  []float32
 	tempFiles []string
 }
 
@@ -76,6 +79,7 @@ func (p *Player) Play(path string) bool {
 		p.Status = "Unsupported or unreadable: " + filepath.Base(path)
 		return false
 	}
+	p.Waveform = buildWaveform(path, 220)
 	p.music = m
 	rl.SetMusicVolume(p.music, p.Volume)
 	rl.PlayMusicStream(p.music)
@@ -116,6 +120,44 @@ func playablePath(path string) (string, string, error) {
 		return "", "", fmt.Errorf("Could not decode FLAC: %s", filepath.Base(path))
 	}
 	return outPath, outPath, nil
+}
+
+func buildWaveform(path string, bars int) []float32 {
+	if _, err := exec.LookPath("ffmpeg"); err != nil || bars <= 0 {
+		return nil
+	}
+	cmd := exec.Command("ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-ar", "8000", "-f", "s16le", "-")
+	data, err := cmd.Output()
+	if err != nil || len(data) < 2 {
+		return nil
+	}
+	samples := len(data) / 2
+	chunk := samples / bars
+	if chunk < 1 {
+		chunk = 1
+	}
+	wave := make([]float32, bars)
+	for b := 0; b < bars; b++ {
+		start, end := b*chunk, minInt((b+1)*chunk, samples)
+		var sum float64
+		for i := start; i < end; i++ {
+			s := int16(binary.LittleEndian.Uint16(data[i*2:]))
+			sum += math.Abs(float64(s)) / 32768.0
+		}
+		if end > start {
+			wave[b] = float32(sum / float64(end-start))
+		}
+	}
+	maxV := float32(.001)
+	for _, v := range wave {
+		if v > maxV {
+			maxV = v
+		}
+	}
+	for i := range wave {
+		wave[i] = float32(math.Sqrt(float64(wave[i] / maxV)))
+	}
+	return wave
 }
 
 func validMusic(m rl.Music) bool { return m.CtxData != nil && m.Stream.Buffer != nil }
