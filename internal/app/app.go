@@ -27,11 +27,14 @@ type App struct {
 	playingTrack int
 	carouselX    float32
 	query        string
+	padCooldown  float32
+	controller   Controller
 }
 
 func Run() {
 	rl.SetConfigFlags(rl.FlagWindowResizable | rl.FlagMsaa4xHint)
-	rl.InitWindow(1220, 760, "Musa — your music shelf")
+	rl.InitWindow(1220, 760, "Musa - your music shelf")
+	rl.SetExitKey(0)
 	defer rl.CloseWindow()
 	rl.InitAudioDevice()
 	defer rl.CloseAudioDevice()
@@ -48,6 +51,10 @@ func (a *App) Close() { a.player.Close(); a.lib.Unload() }
 
 func (a *App) Update() {
 	a.player.Update()
+	a.controller = DetectController()
+	if a.padCooldown > 0 {
+		a.padCooldown -= rl.GetFrameTime()
+	}
 	if rl.IsKeyPressed(rl.KeyTab) {
 		if a.mode == AlbumMode {
 			a.mode = TrackMode
@@ -111,10 +118,10 @@ func (a *App) updateTracks(wheel float32) {
 }
 
 func (a *App) updateGamepad() {
-	if !rl.IsGamepadAvailable(0) {
+	if !a.controller.Connected {
 		return
 	}
-	if rl.IsGamepadButtonPressed(0, rl.GamepadButtonRightFaceDown) {
+	if padPressed(rl.GamepadButtonRightFaceDown) { // DualShock: Cross
 		if a.mode == AlbumMode {
 			a.mode = TrackMode
 			a.track = 0
@@ -122,27 +129,46 @@ func (a *App) updateGamepad() {
 			a.playSelected()
 		}
 	}
-	if rl.IsGamepadButtonPressed(0, rl.GamepadButtonRightFaceRight) {
+	if padPressed(rl.GamepadButtonRightFaceRight) {
 		a.mode = AlbumMode
-	}
-	if rl.IsGamepadButtonPressed(0, rl.GamepadButtonMiddleRight) {
+	} // Circle
+	if padPressed(rl.GamepadButtonMiddleRight) {
 		a.player.TogglePause()
+	} // Options
+	if padPressed(rl.GamepadButtonMiddleLeft) {
+		a.mode = AlbumMode
+	} // Share
+
+	if a.padCooldown > 0 {
+		return
 	}
-	if a.mode == AlbumMode {
-		if rl.IsGamepadButtonPressed(0, rl.GamepadButtonLeftFaceRight) {
+	dx := padAxis(rl.GamepadAxisLeftX)
+	dy := padAxis(rl.GamepadAxisLeftY)
+	moved := false
+	if a.mode == AlbumMode && len(a.lib.Albums) > 0 {
+		if padPressed(rl.GamepadButtonLeftFaceRight) || dx > 0 {
 			a.album = minInt(a.album+1, len(a.lib.Albums)-1)
+			moved = true
 		}
-		if rl.IsGamepadButtonPressed(0, rl.GamepadButtonLeftFaceLeft) {
+		if padPressed(rl.GamepadButtonLeftFaceLeft) || dx < 0 {
 			a.album = maxInt(a.album-1, 0)
+			moved = true
 		}
 	} else {
 		tracks := a.albumTracks()
-		if rl.IsGamepadButtonPressed(0, rl.GamepadButtonLeftFaceDown) {
-			a.track = minInt(a.track+1, len(tracks)-1)
+		if len(tracks) > 0 {
+			if padPressed(rl.GamepadButtonLeftFaceDown) || dy > 0 {
+				a.track = minInt(a.track+1, len(tracks)-1)
+				moved = true
+			}
+			if padPressed(rl.GamepadButtonLeftFaceUp) || dy < 0 {
+				a.track = maxInt(a.track-1, 0)
+				moved = true
+			}
 		}
-		if rl.IsGamepadButtonPressed(0, rl.GamepadButtonLeftFaceUp) {
-			a.track = maxInt(a.track-1, 0)
-		}
+	}
+	if moved {
+		a.padCooldown = .16
 	}
 }
 
@@ -196,7 +222,15 @@ func (a *App) Draw() {
 	rl.ClearBackground(rl.Black)
 	ui.Gradient(w, h)
 	rl.DrawText("Musa", 28, 22, 34, rl.RayWhite)
-	rl.DrawText("←/→ browse · Enter/✕ open-play · ○ back · Options/Space pause", 126, 36, 15, ui.Fade(rl.LightGray, .78))
+	hint := "Keyboard: arrows browse, Enter open/play, Tab back, Space pause"
+	if a.controller.Connected {
+		kind := "Controller"
+		if a.controller.DualShock {
+			kind = "DualShock"
+		}
+		hint = fmt.Sprintf("%s: D-pad/left stick browse, Cross open/play, Circle back, Options pause", kind)
+	}
+	rl.DrawText(hint, 126, 36, 15, ui.Fade(rl.LightGray, .78))
 	if a.mode == AlbumMode {
 		a.drawShelf(w, h)
 	} else {
