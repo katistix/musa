@@ -43,6 +43,7 @@ func (a *App) drawBase(w, h float32, underOverlay bool) {
 	}
 	if !underOverlay {
 		a.drawPlayer(w, h)
+		a.drawHints(w, h, baseMode)
 	}
 }
 
@@ -96,11 +97,23 @@ func (a *App) drawBlurredScene(w, h, p float32) {
 
 func (a *App) drawHeader(w float32) {
 	ui.Text("Musa", 42, 30, 42, rl.RayWhite)
-	hint := "Arrows browse   Enter play/open   N now playing   Space pause"
+	status := "Keyboard available"
 	if a.controller.Connected {
-		hint = "DualShock: D-pad or left stick browse   Cross play/open   Triangle now playing   Circle back   Options pause"
+		status = "DualShock connected"
 	}
-	ui.TextFit(hint, 172, 48, w-210, 20, ui.Fade(rl.LightGray, .82))
+	ui.TextFit(status, 172, 48, w-210, 20, ui.Fade(rl.LightGray, .72))
+}
+
+func (a *App) drawHints(w, h float32, mode Mode) {
+	if a.controller.Connected {
+		hints := []ui.Hint{{Button: "Dpad", Label: "Browse"}, {Button: "Cross", Label: "Open"}, {Button: "Triangle", Label: "Now Playing"}, {Button: "Options", Label: "Pause"}}
+		if mode == TrackMode {
+			hints = []ui.Hint{{Button: "Dpad", Label: "Select"}, {Button: "Cross", Label: "Play"}, {Button: "Circle", Label: "Back"}, {Button: "Triangle", Label: "Now Playing"}, {Button: "Options", Label: "Pause"}}
+		}
+		ui.DrawHints(hints, w, h)
+		return
+	}
+	ui.DrawHints([]ui.Hint{{Button: "Arrows", Label: "Browse"}, {Button: "Enter", Label: "Open/Play"}, {Button: "N", Label: "Now Playing"}, {Button: "Space", Label: "Pause"}}, w, h)
 }
 
 func (a *App) drawShelf(w, h float32) {
@@ -108,30 +121,33 @@ func (a *App) drawShelf(w, h float32) {
 		ui.Text("No music found in ~/Music", 56, 150, 32, rl.RayWhite)
 		return
 	}
-	center, spacing, baseY := w/2, float32(235), float32(175)
+	center := w / 2
+	focusSize := min(h*.33, w*.22)
+	spacing := focusSize * 1.55
+	baseY := h * .23
 	for i := range a.lib.Albums {
 		d := float32(i) - a.carouselX
-		if abs(d) > 3.3 {
+		if abs(d) > 2.0 {
 			continue
 		}
-		scale := 1 - min(abs(d)*.12, .42)
-		s := 220 * scale
+		scale := 1 - min(abs(d)*.35, .52)
+		s := focusSize * scale
 		x := center + d*spacing - s/2
-		y := baseY + abs(d)*26
-		tint := rl.Color{R: 255, G: 255, B: 255, A: uint8(255 * scale)}
-		rl.DrawRectangleRounded(rl.Rectangle{X: x + 16, Y: y + 20, Width: s, Height: s}, .07, 10, rl.Color{R: 0, G: 0, B: 0, A: uint8(95 * scale)})
+		y := baseY + (focusSize-s)/2
+		alpha := uint8(255 * scale)
+		tint := rl.Color{R: 255, G: 255, B: 255, A: alpha}
 		ui.CoverOrDisc(a.lib.Cover(i), x, y, s, tint)
 		if i == a.album {
-			rl.DrawRectangleRoundedLines(rl.Rectangle{X: x - 8, Y: y - 8, Width: s + 16, Height: s + 16}, .07, 10, rl.Color{R: 122, G: 220, B: 190, A: 255})
+			rl.DrawRectangleRoundedLines(rl.Rectangle{X: x - 10, Y: y - 10, Width: s + 20, Height: s + 20}, .05, 12, rl.Color{R: 122, G: 220, B: 190, A: 255})
 		}
 	}
-	a.drawAlbumInfo(w, h-210)
+	a.drawAlbumInfo(w, baseY+focusSize+56)
 }
 
 func (a *App) drawAlbumInfo(w, y float32) {
 	al := a.lib.Albums[a.album]
-	ui.TextFit(al.Title, 80, y, w-160, 42, rl.RayWhite)
-	ui.TextFit(fmt.Sprintf("%s   %d tracks", al.Artist, len(al.Tracks)), 84, y+58, w-168, 24, ui.Fade(rl.LightGray, .82))
+	ui.TextFit(al.Title, 120, y, w-240, 40, rl.RayWhite)
+	ui.TextFit(fmt.Sprintf("%s   %d tracks", al.Artist, len(al.Tracks)), 124, y+54, w-248, 23, ui.Fade(rl.LightGray, .82))
 }
 
 func (a *App) drawAlbumTracks(w, h float32) {
@@ -164,7 +180,7 @@ func (a *App) drawTrackRow(i, ti int, x, y, row, w float32) {
 }
 
 func (a *App) drawPlayer(w, h float32) {
-	bar := rl.Rectangle{X: 46, Y: h - 70, Width: w - 92, Height: 12}
+	bar := rl.Rectangle{X: 64, Y: h - 118, Width: w - 128, Height: 10}
 	r := clamp(a.player.Pos()/a.player.Len(), 0, 1)
 	rl.DrawRectangleRounded(bar, .5, 8, rl.Color{R: 45, G: 49, B: 67, A: 255})
 	rl.DrawRectangleRounded(rl.Rectangle{X: bar.X, Y: bar.Y, Width: bar.Width * r, Height: bar.Height}, .5, 8, rl.Color{R: 122, G: 220, B: 190, A: 255})
@@ -176,7 +192,7 @@ func (a *App) drawPlayer(w, h float32) {
 	if a.player.Status != "" {
 		line = a.player.Status
 	}
-	ui.TextFit(line, 46, h-42, w-92, 20, ui.Fade(rl.RayWhite, .86))
+	ui.TextFit(line, 64, h-94, w-128, 19, ui.Fade(rl.RayWhite, .86))
 }
 
 func (a *App) drawNowPlaying(w, h float32) {
@@ -189,6 +205,7 @@ func (a *App) drawNowPlaying(w, h float32) {
 		ui.TextFit("Nothing playing", 72, h*.36+offset, w-144, 58, rl.Color{R: 255, G: 255, B: 255, A: alpha})
 		ui.TextFit("Pick a track from one of your records.", 76, h*.36+72+offset, w-152, 28, ui.Fade(rl.LightGray, .82*p))
 		a.drawNowPlayingWaveform(w, h)
+		a.drawNowPlayingHints(w, h)
 		return
 	}
 	cover := min(h*.50, w*.34) * (.92 + .08*p)
@@ -202,15 +219,23 @@ func (a *App) drawNowPlaying(w, h float32) {
 	ui.TextFit("NOW PLAYING", tx, y+18, w-tx-72, 20, rl.Color{R: 122, G: 220, B: 190, A: alpha})
 	ui.TextFit(t.Title, tx, y+62, w-tx-72, 54, rl.Color{R: 255, G: 255, B: 255, A: alpha})
 	ui.TextFit(ui.Meta(t.Artist, t.Album), tx+2, y+132, w-tx-74, 30, ui.Fade(rl.LightGray, .88*p))
-	ui.TextFit("Right stick scrub   D-pad left/right skip 10s   Circle/Triangle return", tx+2, y+cover-34, w-tx-74, 22, ui.Fade(rl.LightGray, .68*p))
 	a.drawNowPlayingWaveform(w, h)
+	a.drawNowPlayingHints(w, h)
+}
+
+func (a *App) drawNowPlayingHints(w, h float32) {
+	if a.controller.Connected {
+		ui.DrawHints([]ui.Hint{{Button: "RStick", Label: "Scrub"}, {Button: "Dpad", Label: "Skip 10s"}, {Button: "Cross", Label: "Play/Pause"}, {Button: "Circle", Label: "Back"}, {Button: "Triangle", Label: "Close"}}, w, h)
+		return
+	}
+	ui.DrawHints([]ui.Hint{{Button: "Left/Right", Label: "Seek"}, {Button: "Space", Label: "Pause"}, {Button: "N", Label: "Close"}}, w, h)
 }
 
 func (a *App) drawNowPlayingWaveform(w, h float32) {
 	wave := a.player.Waveform
 	p := clamp(a.nowAnim, 0, 1)
 	left, right := float32(72), w-72
-	top, height := h-178+(1-p)*28, float32(112)
+	top, height := h-230+(1-p)*28, float32(96)
 	mid := top + height/2
 	if len(wave) == 0 {
 		rl.DrawRectangleRounded(rl.Rectangle{X: left, Y: top, Width: right - left, Height: height}, .08, 10, rl.Color{R: 30, G: 36, B: 52, A: uint8(190 * p)})
@@ -233,8 +258,8 @@ func (a *App) drawNowPlayingWaveform(w, h float32) {
 		}
 		rl.DrawRectangleRounded(rl.Rectangle{X: x, Y: mid - amp/2, Width: bw, Height: amp}, .7, 4, col)
 	}
-	ui.TextFit(ui.Dur(a.player.Pos()), left, top+height+16, 120, 20, ui.Fade(rl.RayWhite, .86*p))
-	ui.TextFit(ui.Dur(a.player.Len()), right-90, top+height+16, 90, 20, ui.Fade(rl.RayWhite, .86*p))
+	ui.TextFit(ui.Dur(a.player.Pos()), left, top+height+12, 120, 20, ui.Fade(rl.RayWhite, .86*p))
+	ui.TextFit(ui.Dur(a.player.Len()), right-90, top+height+12, 90, 20, ui.Fade(rl.RayWhite, .86*p))
 }
 
 func (a *App) albumForTrack(track int) int {
