@@ -47,8 +47,8 @@ func applyMacMask(img *image.NRGBA) {
 	n := 5.0
 	for y := 0; y < int(h); y++ {
 		for x := 0; x < int(w); x++ {
-			dx := math.Abs((float64(x)+0.5-cx)/a)
-			dy := math.Abs((float64(y)+0.5-cy)/b)
+			dx := math.Abs((float64(x) + 0.5 - cx) / a)
+			dy := math.Abs((float64(y) + 0.5 - cy) / b)
 			v := math.Pow(dx, n) + math.Pow(dy, n)
 			if v > 1 {
 				i := img.PixOffset(x, y)

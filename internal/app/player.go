@@ -119,7 +119,8 @@ func playablePath(path string) (string, string, error) {
 	if strings.ToLower(filepath.Ext(path)) != ".flac" {
 		return path, "", nil
 	}
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
+	ffmpeg, err := findFFmpeg()
+	if err != nil {
 		return "", "", fmt.Errorf("FLAC requires ffmpeg: brew install ffmpeg")
 	}
 	out, err := os.CreateTemp("", "musa-*.wav")
@@ -128,7 +129,7 @@ func playablePath(path string) (string, string, error) {
 	}
 	outPath := out.Name()
 	_ = out.Close()
-	cmd := exec.Command("ffmpeg", "-y", "-v", "error", "-i", path, "-f", "wav", "-acodec", "pcm_s16le", outPath)
+	cmd := exec.Command(ffmpeg, "-y", "-v", "error", "-i", path, "-f", "wav", "-acodec", "pcm_s16le", outPath)
 	if err := cmd.Run(); err != nil {
 		_ = os.Remove(outPath)
 		return "", "", fmt.Errorf("Could not decode FLAC: %s", filepath.Base(path))
@@ -137,10 +138,11 @@ func playablePath(path string) (string, string, error) {
 }
 
 func buildWaveform(path string, bars int) []float32 {
-	if _, err := exec.LookPath("ffmpeg"); err != nil || bars <= 0 {
+	ffmpeg, err := findFFmpeg()
+	if err != nil || bars <= 0 {
 		return nil
 	}
-	cmd := exec.Command("ffmpeg", "-v", "error", "-i", path, "-ac", "1", "-ar", "8000", "-f", "s16le", "-")
+	cmd := exec.Command(ffmpeg, "-v", "error", "-i", path, "-ac", "1", "-ar", "8000", "-f", "s16le", "-")
 	data, err := cmd.Output()
 	if err != nil || len(data) < 2 {
 		return nil
@@ -172,6 +174,18 @@ func buildWaveform(path string, bars int) []float32 {
 		wave[i] = float32(math.Sqrt(float64(wave[i] / maxV)))
 	}
 	return wave
+}
+
+func findFFmpeg() (string, error) {
+	if p, err := exec.LookPath("ffmpeg"); err == nil {
+		return p, nil
+	}
+	for _, p := range []string{"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/local/bin/ffmpeg", "/usr/bin/ffmpeg"} {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("ffmpeg not found")
 }
 
 func validMusic(m rl.Music) bool { return m.CtxData != nil && m.Stream.Buffer != nil }
