@@ -4,6 +4,10 @@
   <img src="assets/icon.png" alt="Musa icon" width="160" height="160">
 </p>
 
+<p align="center">
+  <video src="./musa%20presentation.mp4" controls width="900"></video>
+</p>
+
 A controller-friendly music player for your own library.
 
 Musa is built with Go + Raylib and is designed around browsing albums, enjoying cover art, and moving through your music with a clean, console-like feel.
