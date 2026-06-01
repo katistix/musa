@@ -1,5 +1,5 @@
 package main
 
-import "musa/internal/app"
+import "github.com/katistix/musa/internal/app"
 
 func main() { app.Run() }

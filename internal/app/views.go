@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"musa/internal/ui"
+	"github.com/katistix/musa/internal/ui"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )

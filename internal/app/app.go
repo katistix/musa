@@ -3,8 +3,8 @@ package app
 import (
 	"math"
 
-	"musa/internal/music"
-	"musa/internal/ui"
+	"github.com/katistix/musa/internal/music"
+	"github.com/katistix/musa/internal/ui"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
